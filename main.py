@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import os
+
 import openpyxl
 from openpyxl import load_workbook
 
@@ -53,7 +55,7 @@ class ParserKTO:
         'Время автономной работы (ориентировочно)',
         'Расчетное время на АКБ:'
     ]
-    TEST_CELL = 'G17'  # Если в ячейки есть данные то лист ексел нужно считать (только для ЭПУ)
+    # TEST_CELL = 'G17'  # Если в ячейки есть данные то лист ексел нужно считать (только для ЭПУ)
 
     def __init__(self, list_files):
         self.title_data_for_write = []
@@ -68,10 +70,11 @@ class ParserKTO:
             'end_row_number': 1
         }
         self._create_file()
+        self.count_process = 0
+        self.total_files = len(self.list_files)
 
     def run(self):
         for file in self.list_files:
-            # wb = load_workbook('./25001066368-2020-COMPLEX-1.xlsm', data_only=True)
             wb = load_workbook(file, data_only=True)
             sh_names = wb.sheetnames
 
@@ -86,13 +89,16 @@ class ParserKTO:
                         # print(f'{row[0].value} {row[shift].value}')
                         self.title_data_for_write.append(row[shift].value)
                         break
+
             # Читаю отчет ЭПУ (все листы)
             for sh_name in sh_names:
                 if sh_name[:3] == 'ЭПУ':
                     ws = wb[sh_name]
-                    if ws[ParserKTO.TEST_CELL].value is None:
+                    if ws.sheet_state == 'hidden':
                         continue
-                    print(f'==========={sh_name}============')
+                    # if ws[ParserKTO.TEST_CELL].value is None:
+                    #     continue
+                    # print(f'==========={sh_name}============')
                     for index, row in enumerate(ws.iter_rows()):
                         val = row[0].value
                         if val is None:
@@ -100,13 +106,16 @@ class ParserKTO:
                         for key, shifts in ParserKTO.search_scheme_EPU.items():
                             if val == key:
                                 for shift in shifts:
-                                    print(f'{row[0].value} {row[shift].value}')
+                                    # print(f'{row[0].value} {row[shift].value}')
                                     self.epu_data_for_write.append(row[shift].value)
                                 break
                     write_row = self.title_data_for_write + self.epu_data_for_write
                     self._write_row_to_file(data_for_write=write_row)
+
                     self.epu_data_for_write = []
             self.title_data_for_write = []
+            self.count_process += 1
+            print(f'Считано {self.count_process}, осталось считать {self.total_files - self.count_process} файлов.')
 
     def _create_file(self):
         self.my_wb = openpyxl.Workbook()
@@ -122,10 +131,33 @@ class ParserKTO:
         self.my_wb.save(self.file_to_create['Name'])
 
 
+
+@time_track
+def get_list_of_file(dirpath):
+    list_of_files = []
+    try:
+        file = open('links.txt', 'w', encoding='UTF-8')
+        for dirpath, _, filenames in os.walk(dirpath):
+            for filename in filenames:
+                if filename.endswith('.xlsm'):
+                    link = os.path.join(dirpath, filename)
+                    list_of_files.append(link)
+                    file.write(link + '\n')
+    except Exception as exe:
+        print(exe)
+    finally:
+        file.close()
+    return list_of_files
+
+
 @time_track
 def main():
-    list_files = ['./25001066368-2020-COMPLEX-1.xlsm', './25001100029-2020-COMPLEX-1.xlsm']
-    parser = ParserKTO(list_files=list_files)
+    dir = os.path.normpath(r"C:\Users\m.tkachev\Desktop\python\KTO_parser\test dir")
+    list_of_files = get_list_of_file(dirpath=dir)
+    # # pprint(list_of_files)
+    # list_of_files = ['./25001066368-2020-COMPLEX-1.xlsm', './25001100029-2020-COMPLEX-1.xlsm']
+    # list_of_files = ['./25001100029-2020-COMPLEX-1.xlsm']
+    parser = ParserKTO(list_files=list_of_files)
     parser.run()
 
 
