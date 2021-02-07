@@ -55,17 +55,15 @@ class ParserKTO:
         'Время автономной работы (ориентировочно)',
         'Расчетное время на АКБ:'
     ]
-    # TEST_CELL = 'G17'  # Если в ячейки есть данные то лист ексел нужно считать (только для ЭПУ)
 
     def __init__(self, list_files):
-        self.title_data_for_write = []
-        self.epu_data_for_write = []
+
         # self.end_row_number = 1
         self.my_wb = None
         self.my_sheet = None
         self.list_files = list_files
         self.file_to_create = {
-            'Name': "./Report_KTO.xlsx",
+            'Name': "./Report_KTO_test.xlsx",
             'sheet.title': "Данные КТО",
             'end_row_number': 1
         }
@@ -75,47 +73,75 @@ class ParserKTO:
 
     def run(self):
         for file in self.list_files:
-            wb = load_workbook(file, data_only=True)
-            sh_names = wb.sheetnames
+            try:
+                wb = load_workbook(file, data_only=True)
+            except Exception as exc:
+                log = open('log.txt', 'a', encoding='UTF-8')
+                error_str = f'{file} --> {type(exc)} {exc} \n'
+                log.write(error_str)
+                log.close()
+                continue
 
-            # Читаю титульный лист
-            ws = wb[sh_names[0]]
-            for index, row in enumerate(ws.iter_rows()):
-                val = row[0].value
-                if val is None:
-                    continue
-                for key, shift in ParserKTO.search_scheme_title.items():
-                    if val == key:
-                        # print(f'{row[0].value} {row[shift].value}')
-                        self.title_data_for_write.append(row[shift].value)
-                        break
+            if file.endswith('.xlsm'):
+                self._checking_new_report(wb)
+            elif file.endswith('.xlsx'):
+                self._checking_old_report(wb, file)
+            # elif file.endswith('.pdf'):
+            #     https: // dev - gang.ru / article / rabota - s - pdf - failami - v - python - cztenie - i - razbor - 06
+            #     mta2spn0 /
 
-            # Читаю отчет ЭПУ (все листы)
-            for sh_name in sh_names:
-                if sh_name[:3] == 'ЭПУ':
-                    ws = wb[sh_name]
-                    if ws.sheet_state == 'hidden':
-                        continue
-                    # if ws[ParserKTO.TEST_CELL].value is None:
-                    #     continue
-                    # print(f'==========={sh_name}============')
-                    for index, row in enumerate(ws.iter_rows()):
-                        val = row[0].value
-                        if val is None:
-                            continue
-                        for key, shifts in ParserKTO.search_scheme_EPU.items():
-                            if val == key:
-                                for shift in shifts:
-                                    # print(f'{row[0].value} {row[shift].value}')
-                                    self.epu_data_for_write.append(row[shift].value)
-                                break
-                    write_row = self.title_data_for_write + self.epu_data_for_write
-                    self._write_row_to_file(data_for_write=write_row)
-
-                    self.epu_data_for_write = []
-            self.title_data_for_write = []
             self.count_process += 1
             print(f'Считано {self.count_process}, осталось считать {self.total_files - self.count_process} файлов.')
+
+    def _checking_new_report(self, wb):
+        title_data_for_write = []
+        epu_data_for_write = []
+        sh_names = wb.sheetnames
+        # Читаю титульный лист
+        ws = wb[sh_names[0]]
+        for index, row in enumerate(ws.iter_rows()):
+            val = row[0].value
+            if val is None:
+                continue
+            for key, shift in ParserKTO.search_scheme_title.items():
+                if val == key:
+                    # print(f'{row[0].value} {row[shift].value}')
+                    title_data_for_write.append(row[shift].value)
+                    break
+        # Читаю отчет ЭПУ (все листы)
+        for sh_name in sh_names:
+            if sh_name[:3] == 'ЭПУ':
+                ws = wb[sh_name]
+                if ws.sheet_state == 'hidden':
+                    continue
+                # if ws[ParserKTO.TEST_CELL].value is None:
+                #     continue
+                # print(f'==========={sh_name}============')
+                for index, row in enumerate(ws.iter_rows()):
+                    val = row[0].value
+                    if val is None:
+                        continue
+                    for key, shifts in ParserKTO.search_scheme_EPU.items():
+                        if val == key:
+                            for shift in shifts:
+                                # print(f'{row[0].value} {row[shift].value}')
+                                epu_data_for_write.append(row[shift].value)
+                            break
+                write_row = title_data_for_write + epu_data_for_write
+                self._write_row_to_file(data_for_write=write_row)
+                self.epu_data_for_write = []
+
+
+    def _checking_old_report(self, wb, file):
+        # TEST_CELL = 'A13'  # Старый формат отчета А18 содерижит "Владелец объекта:"
+        title_data_for_write = []
+        epu_data_for_write = []
+        sh_names = wb.sheetnames
+        ws = wb[sh_names[0]]
+        if ws['A13'] == "Владелец объекта:":
+            test_data = []
+            test_data.append(file)
+            self._write_row_to_file(test_data)
 
     def _create_file(self):
         self.my_wb = openpyxl.Workbook()
@@ -143,18 +169,25 @@ def get_list_of_file(dirpath):
                     link = os.path.join(dirpath, filename)
                     list_of_files.append(link)
                     file.write(link + '\n')
-    except Exception as exe:
-        print(exe)
-    finally:
+                elif filename.endswith('.xlsx'):
+                    link = os.path.join(dirpath, filename)
+                    list_of_files.append(link)
+                    file.write(link + '\n')
         file.close()
+    except Exception as exc:
+        log = open('log.txt', 'a', encoding='UTF-8')
+        error_str = f'Error get file {filename} --> {type(exc)} {exc} \n'
+        log.write(error_str)
+        log.close()
     return list_of_files
 
 
 @time_track
 def main():
-    dir = os.path.normpath(r"C:\Users\m.tkachev\Desktop\python\KTO_parser\test dir")
+    # dir = os.path.normpath(r"C:\Users\m.tkachev\Desktop\python\KTO_parser\test dir")
+    dir = os.path.normpath(r"\\ceph-msk\Юг ТО СС\2020\Элиста\Комплекстное ТО")
     list_of_files = get_list_of_file(dirpath=dir)
-    # # pprint(list_of_files)
+    print(f'Найдено файлов: {len(list_of_files)}')
     # list_of_files = ['./25001066368-2020-COMPLEX-1.xlsm', './25001100029-2020-COMPLEX-1.xlsm']
     # list_of_files = ['./25001100029-2020-COMPLEX-1.xlsm']
     parser = ParserKTO(list_files=list_of_files)
