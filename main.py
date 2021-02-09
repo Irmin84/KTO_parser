@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import os
-
+from threading import Thread
 import openpyxl
 from openpyxl import load_workbook
-
 from utils import time_track
+import time
 
 
-class ParserKTO:
+class ParserKTO(Thread):
     # В значениях словарей уазаны номера столбцов, для считывания значений (начиная с 0 для екселя)
     search_scheme_title_new = {
         'Номер объекта:': 1,
@@ -73,21 +73,29 @@ class ParserKTO:
         'Ссылка на отчет'
     ]
 
-    def __init__(self, list_files):
-        # self.end_row_number = 1
-        self.my_wb = None
-        self.my_sheet = None
-        self.list_files = list_files
+    def __init__(self, task, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.list_files = []
+        self.directory = task[1]
         self.file_to_create = {
-            'Name': "./Report_KTO_test.xlsx",
+            'Name': task[0],
             'sheet.title': "Данные КТО",
             'end_row_number': 1
         }
+        self.my_wb = None
+        self.my_sheet = None
         self._create_file()
+        self.percentage_of_completion = 0
         self.count_process = 0
-        self.total_files = len(self.list_files)
+        self.total_files = None
 
     def run(self):
+        self.list_files = self._get_list_of_file(self.directory)
+        if not self.list_files:
+            print(f'В директории {self.directory} отчетов КТО в формате exel не найдено.')
+            return
+        self.total_files = len(self.list_files)
+
         for file in self.list_files:
             try:
                 wb = load_workbook(file, data_only=True)
@@ -102,12 +110,19 @@ class ParserKTO:
                 self._checking_new_report(wb, file)
             elif file.endswith('.xlsx'):
                 self._checking_old_report(wb, file)
+            elif file.endswith('.XLSX'):
+                self._checking_old_report(wb, file)
+
             # elif file.endswith('.pdf'):
             # https: // dev - gang.ru / article / rabota - s - pdf - failami - v - python - cztenie - i - razbor - 06
             #     mta2spn0 /
 
             self.count_process += 1
-            print(f'Считано {self.count_process}, осталось считать {self.total_files - self.count_process} файлов.')
+            try:
+                self.percentage_of_completion = round(((self.count_process * 100) / self.total_files), 1)
+            except ZeroDivisionError:
+                print(f"При вычислении прогресса парсинга для {self.file_to_create['Name'][2:]} произошло деление на 0")
+            # print(f'Проверено {self.count_process}, осталось считать {self.total_files - self.count_process} файлов.')
 
     def _checking_new_report(self, wb, file):
         title_data_for_write = []
@@ -144,6 +159,7 @@ class ParserKTO:
                 epu_data_for_write.append(file)
                 write_row = title_data_for_write + epu_data_for_write
                 self._write_row_to_file(data_for_write=write_row)
+                epu_data_for_write = []
 
     def _checking_old_report(self, wb, file):
         title_data_for_write = []
@@ -203,9 +219,10 @@ class ParserKTO:
                     epu_data_for_write.append(None)
                     epu_data_for_write.append(None)
                     epu_data_for_write.append(file)
-
+                    temp_data = []
                     write_row = title_data_for_write + epu_data_for_write
                     self._write_row_to_file(data_for_write=write_row)
+                    epu_data_for_write = []
 
     def _create_file(self):
         self.my_wb = openpyxl.Workbook()
@@ -224,37 +241,86 @@ class ParserKTO:
             print(f"Ошибка записи в файл {self.file_to_create['Name']}, закройте файл и перезапустите программу.")
             quit()
 
-
-@time_track
-def get_list_of_file(dirpath):
-    list_of_files = []
-    try:
-        for dirpath, _, filenames in os.walk(dirpath):
-            for filename in filenames:
-                if filename.endswith('.xlsm'):
-                    link = os.path.join(dirpath, filename)
-                    list_of_files.append(link)
-                elif filename.endswith('.xlsx'):
-                    link = os.path.join(dirpath, filename)
-                    list_of_files.append(link)
-    except Exception as exc:
-        log = open('log.txt', 'a', encoding='UTF-8')
-        error_str = f'Error get file {dirpath} --> {type(exc)} {exc} \n'
-        log.write(error_str)
-        log.close()
-    return list_of_files
+    @staticmethod
+    def _get_list_of_file(dirpath):
+        list_of_files = []
+        normal_dir = os.path.normpath(dirpath)
+        try:
+            for dirpath, _, filenames in os.walk(normal_dir):
+                for filename in filenames:
+                    if filename[:26] == 'Форма устранения замечаний':
+                        continue
+                    elif filename[:32] == 'Копия Форма устранения замечаний':
+                        continue
+                    elif filename.endswith('.xlsm'):
+                        link = os.path.join(dirpath, filename)
+                        list_of_files.append(link)
+                    elif filename.endswith('.xlsx'):
+                        link = os.path.join(dirpath, filename)
+                        list_of_files.append(link)
+                    elif filename.endswith('.XLSX'):
+                        link = os.path.join(dirpath, filename)
+                        list_of_files.append(link)
+        except Exception as exc:
+            log = open('log.txt', 'a', encoding='UTF-8')
+            error_str = f'Error get file {dirpath} --> {type(exc)} {exc} \n'
+            log.write(error_str)
+            log.close()
+        return list_of_files
 
 
 @time_track
 def main():
-    dir = os.path.normpath(r"C:\Users\m.tkachev\Desktop\python\KTO_parser\test dir")
-    # dir = os.path.normpath(r"\\ceph-msk\Юг ТО СС\2020\Элиста\Комплекстное ТО")
-    list_of_files = get_list_of_file(dirpath=dir)
-    print(f'Найдено файлов: {len(list_of_files)}')
+    tasks = []
+    try:
+        first_line = True
+        with open('task.txt', 'r', encoding='UTF8') as file:
+            for line in file:
+                if first_line:
+                    first_line = False
+                    continue
+                tuple_task = line.split(sep=',')
+                tuple_task[0] = f'./{tuple_task[0]}'
+                if tuple_task[1].endswith('\n'):
+                    tuple_task[1] = tuple_task[1][:-1]
+                tasks.append(tuple_task)
+    except Exception as exc:
+        print(f'Error read file task.txt: {exc}')
+        quit()
+
+    # dir = os.path.normpath(r"C:\Users\m.tkachev\Desktop\python\KTO_parser\test dir")
+    # dir = os.path.normpath(r"\\ceph-msk\Юг ТО СС\2019\Ростов\Комплексное ТО")
+
+    # list_of_files = get_list_of_file(task)
+    # print(f'Найдено файлов: {len(list_of_files)}')
     # list_of_files = ['./25001066368-2020-COMPLEX-1.xlsm', './25001100029-2020-COMPLEX-1.xlsm']
     # list_of_files = ['./25001100029-2020-COMPLEX-1.xlsm']
-    parser = ParserKTO(list_files=list_of_files)
-    parser.run()
+    # for task in tasks:
+    #     parser = ParserKTO(task=task)
+    parsers = [ParserKTO(task=task) for task in tasks]
+    print('Ищем файлы в указанных директориях. "Это может занять несколько минут.')
+
+    for parser in parsers:
+        parser.start()
+
+    count_thread = len(parsers)
+    process_flag = True
+    while process_flag:
+        time.sleep(10)
+        sum_proc = 0
+        for parser in parsers:
+            print(f"{parser.file_to_create['Name'][2:]:<40} --> {parser.percentage_of_completion:>4} %")
+            sum_proc += parser.percentage_of_completion
+            if parser.percentage_of_completion == 100:
+                process_flag = False
+            else:
+                process_flag = True
+        print('====================================================')
+        print(f'Парсинг выпонен на {round(sum_proc/count_thread, 1)} %')
+        print('====================================================')
+
+    for parser in parsers:
+        parser.join()
 
 
 if __name__ == '__main__':

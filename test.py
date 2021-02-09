@@ -131,3 +131,14 @@ print(df)
 #     main()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
+
+try:
+    with open(self.link, 'r', encoding='UTF8') as file:
+        for line in file:
+            if first_line:
+                first_line = False
+                continue
+            transactions = line.split(sep=',')
+
+except Exception as exc:
+    print(f'Error {exc}')
