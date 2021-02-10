@@ -85,7 +85,7 @@ class ParserKTO(Thread):
         self.read_file = None
         self.my_wb = None
         self.my_sheet = None
-        self._create_file()
+
         self.percentage_of_completion = 0
         self.count_process = 0
         self.total_files = None
@@ -97,39 +97,40 @@ class ParserKTO(Thread):
             self.percentage_of_completion = float(100)
             return
         self.total_files = len(self.list_files)
-
+        self._create_file()
         for self.read_file in self.list_files:
+            # TODO временная вставка
+            # check_links = open((self.file_to_create['Name'][:-5] + '_Links.txt'), 'a', encoding='UTF-8')
+            # write_str = self.read_file + '\n'
+            # check_links.write(write_str)
+            # check_links.close()
             try:
                 wb = load_workbook(self.read_file, data_only=True)
+                if self.read_file.endswith('.xlsm'):
+                    self._checking_new_report(wb)
+                elif self.read_file.endswith('.xlsx'):
+                    self._checking_old_report(wb)
+                elif self.read_file.endswith('.XLSX'):
+                    self._checking_old_report(wb)
             except Exception as exc:
                 log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
                 error_str = f'{self.read_file} --> {type(exc)} {exc} \n'
                 log.write(error_str)
                 log.close()
+            finally:
                 self.count_process += 1
-                continue
-
-            if self.read_file.endswith('.xlsm'):
-                self._checking_new_report(wb)
-            elif self.read_file.endswith('.xlsx'):
-                self._checking_old_report(wb)
-            elif self.read_file.endswith('.XLSX'):
-                self._checking_old_report(wb)
-
-            # elif file.endswith('.pdf'):
-            # https: // dev - gang.ru / article / rabota - s - pdf - failami - v - python - cztenie - i - razbor - 06
-            #     mta2spn0 /
-
-            self.count_process += 1
-            try:
                 self.percentage_of_completion = round(((self.count_process * 100) / self.total_files), 1)
-            except ZeroDivisionError:
-                print(f"При вычислении прогресса парсинга для {self.file_to_create['Name'][2:]} произошло деление на 0")
-            # print(f'Проверено {self.count_process}, осталось считать {self.total_files - self.count_process} файлов.')
+        try:
+            self.my_wb.save(self.file_to_create['Name'])
+        except Exception as exc:
+            print(f"Ошибка записи в файл {self.file_to_create['Name']}, закройте файл и перезапустите программу.")
+            log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
+            error_str = f"{self.read_file} --> Ошибка записи в файл {self.file_to_create['Name']}. {type(exc)} {exc} \n"
+            log.write(error_str)
+            log.close()
 
     def _checking_new_report(self, wb):
         title_data_for_write = []
-
         epu_data_for_write = []
         sh_names = wb.sheetnames
         # Читаю титульный лист
@@ -172,9 +173,6 @@ class ParserKTO(Thread):
         sh_names = wb.sheetnames
         # Читаем титульный лист
         ws = wb[sh_names[0]]
-        # for index, row in enumerate(ws.iter_rows()):
-        #     val = row[0].value
-        #     print(val)
         # дополнительная проверка, что это именно отчет КТО ("А13" содерижит "Владелец объекта:")
         if ws['A13'].value == "Владелец объекта:":
             for index, row in enumerate(ws.iter_rows()):
@@ -183,7 +181,6 @@ class ParserKTO(Thread):
                     continue
                 for key, shift in ParserKTO.search_scheme_title_old.items():
                     if val == key:
-                        # print(f'{row[0].value} {row[shift].value}')
                         title_data_for_write.append(row[shift].value)
                         break
             # Читаем отчет ЭПУ (все листы)
@@ -239,14 +236,6 @@ class ParserKTO(Thread):
             write_cell = self.my_sheet.cell(row=self.file_to_create['end_row_number'], column=column_number + 1)
             write_cell.value = data_for_write[column_number]
         self.file_to_create['end_row_number'] += 1
-        try:
-            self.my_wb.save(self.file_to_create['Name'])
-        except Exception as exc:
-            print(f"Ошибка записи в файл {self.file_to_create['Name']}, закройте файл и перезапустите программу.")
-            log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
-            error_str = f"{self.read_file} --> Ошибка записи в файл {self.file_to_create['Name']}. {type(exc)} {exc} \n"
-            log.write(error_str)
-            log.close()
 
     def _get_list_of_file(self, dirpath):
         list_of_files = []
@@ -272,7 +261,7 @@ class ParserKTO(Thread):
                         list_of_files.append(link)
         except Exception as exc:
             log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
-            error_str = f'Error get file {dirpath} --> {type(exc)} {exc} \n'
+            error_str = f'Ошибка поиска файлов в: {dirpath} --> {type(exc)} {exc} \n'
             log.write(error_str)
             log.close()
         return list_of_files
@@ -282,11 +271,12 @@ class ParserKTO(Thread):
 def main():
     tasks = []
     try:
-        # first_line = True
+        # читаем файл с заданиями формата: имя_нового_файла.xlsx,адрес файла
         with open('task.txt', 'r', encoding='UTF8') as file:
             for line in file:
                 tuple_task = line.split(sep=',')
-                if tuple_task[0] == '#':
+                # строки начинающиеся на "#" пропускаем
+                if tuple_task[0][:1] == '#':
                     continue
                 tuple_task[0] = f'./Отчеты/{tuple_task[0]}'
                 if tuple_task[1].endswith('\n'):
@@ -296,33 +286,30 @@ def main():
         print(f'Error read file task.txt: {exc}')
         quit()
 
-    # dir = os.path.normpath(r"C:\Users\m.tkachev\Desktop\python\KTO_parser\test dir")
-    # dir = os.path.normpath(r"\\ceph-msk\Юг ТО СС\2019\Ростов\Комплексное ТО")
-
-    # list_of_files = get_list_of_file(task)
-    # print(f'Найдено файлов: {len(list_of_files)}')
-    # list_of_files = ['./25001066368-2020-COMPLEX-1.xlsm', './25001100029-2020-COMPLEX-1.xlsm']
-    # list_of_files = ['./25001100029-2020-COMPLEX-1.xlsm']
-    # for task in tasks:
-    #     parser = ParserKTO(task=task)
     parsers = [ParserKTO(task=task) for task in tasks]
-    print('Ищем файлы в указанных директориях. "Это может занять несколько минут.')
+    print('Ищем файлы в указанных директориях. Это может занять несколько минут.')
     count_thread = len(parsers)
-
 
     for parser in parsers:
         parser.start()
 
+    process_flag = True
+    while process_flag:
+        time.sleep(15)
+        sum_proc = 0
+        for parser in parsers:
+            print(f"{parser.file_to_create['Name'][2:]:<40} --> {parser.percentage_of_completion:>5} %")
+            sum_proc += parser.percentage_of_completion
+            if parser.percentage_of_completion == float(100):
+                process_flag = False
+            else:
+                process_flag = True
+        print('====================================================')
+        print(f'Парсинг выпонен на {round(sum_proc / count_thread, 1)} %')
+        print('====================================================')
+
     for parser in parsers:
         parser.join()
-        sum_proc = 0
-        for parser_check in parsers:
-            print(f"{parser_check.file_to_create['Name'][2:]:<40} --> {parser_check.percentage_of_completion:>4} %")
-            sum_proc += parser_check.percentage_of_completion
-        print('====================================================')
-        print(f'Парсинг выполен на {round(sum_proc/count_thread, 1)} %')
-        print('====================================================')
-        time.sleep(1)
 
 
 if __name__ == '__main__':
