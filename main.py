@@ -82,6 +82,7 @@ class ParserKTO(Thread):
             'sheet.title': "Данные КТО",
             'end_row_number': 1
         }
+        self.read_file = None
         self.my_wb = None
         self.my_sheet = None
         self._create_file()
@@ -92,26 +93,28 @@ class ParserKTO(Thread):
     def run(self):
         self.list_files = self._get_list_of_file(self.directory)
         if not self.list_files:
-            print(f'В директории {self.directory} отчетов КТО в формате exel не найдено.')
+            print(f'В директории "{self.directory}" отчетов КТО в формате exel не найдено.')
+            self.percentage_of_completion = float(100)
             return
         self.total_files = len(self.list_files)
 
-        for file in self.list_files:
+        for self.read_file in self.list_files:
             try:
-                wb = load_workbook(file, data_only=True)
+                wb = load_workbook(self.read_file, data_only=True)
             except Exception as exc:
-                log = open('log.txt', 'a', encoding='UTF-8')
-                error_str = f'{file} --> {type(exc)} {exc} \n'
+                log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
+                error_str = f'{self.read_file} --> {type(exc)} {exc} \n'
                 log.write(error_str)
                 log.close()
+                self.count_process += 1
                 continue
 
-            if file.endswith('.xlsm'):
-                self._checking_new_report(wb, file)
-            elif file.endswith('.xlsx'):
-                self._checking_old_report(wb, file)
-            elif file.endswith('.XLSX'):
-                self._checking_old_report(wb, file)
+            if self.read_file.endswith('.xlsm'):
+                self._checking_new_report(wb)
+            elif self.read_file.endswith('.xlsx'):
+                self._checking_old_report(wb)
+            elif self.read_file.endswith('.XLSX'):
+                self._checking_old_report(wb)
 
             # elif file.endswith('.pdf'):
             # https: // dev - gang.ru / article / rabota - s - pdf - failami - v - python - cztenie - i - razbor - 06
@@ -124,8 +127,9 @@ class ParserKTO(Thread):
                 print(f"При вычислении прогресса парсинга для {self.file_to_create['Name'][2:]} произошло деление на 0")
             # print(f'Проверено {self.count_process}, осталось считать {self.total_files - self.count_process} файлов.')
 
-    def _checking_new_report(self, wb, file):
+    def _checking_new_report(self, wb):
         title_data_for_write = []
+
         epu_data_for_write = []
         sh_names = wb.sheetnames
         # Читаю титульный лист
@@ -156,12 +160,12 @@ class ParserKTO(Thread):
                                 # print(f'{row[0].value} {row[shift].value}')
                                 epu_data_for_write.append(row[shift].value)
                             break
-                epu_data_for_write.append(file)
+                epu_data_for_write.append(self.read_file)
                 write_row = title_data_for_write + epu_data_for_write
                 self._write_row_to_file(data_for_write=write_row)
                 epu_data_for_write = []
 
-    def _checking_old_report(self, wb, file):
+    def _checking_old_report(self, wb):
         title_data_for_write = []
         epu_data_for_write = []
         temp_data = []
@@ -218,7 +222,7 @@ class ParserKTO(Thread):
                     epu_data_for_write.append(None)
                     epu_data_for_write.append(None)
                     epu_data_for_write.append(None)
-                    epu_data_for_write.append(file)
+                    epu_data_for_write.append(self.read_file)
                     temp_data = []
                     write_row = title_data_for_write + epu_data_for_write
                     self._write_row_to_file(data_for_write=write_row)
@@ -237,32 +241,37 @@ class ParserKTO(Thread):
         self.file_to_create['end_row_number'] += 1
         try:
             self.my_wb.save(self.file_to_create['Name'])
-        except PermissionError:
+        except Exception as exc:
             print(f"Ошибка записи в файл {self.file_to_create['Name']}, закройте файл и перезапустите программу.")
-            quit()
+            log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
+            error_str = f"{self.read_file} --> Ошибка записи в файл {self.file_to_create['Name']}. {type(exc)} {exc} \n"
+            log.write(error_str)
+            log.close()
 
-    @staticmethod
-    def _get_list_of_file(dirpath):
+    def _get_list_of_file(self, dirpath):
         list_of_files = []
         normal_dir = os.path.normpath(dirpath)
         try:
             for dirpath, _, filenames in os.walk(normal_dir):
                 for filename in filenames:
+                    link = os.path.join(dirpath, filename)
                     if filename[:26] == 'Форма устранения замечаний':
                         continue
                     elif filename[:32] == 'Копия Форма устранения замечаний':
                         continue
+                    elif filename[:2] == '~$':
+                        continue
+                    size = os.path.getsize(link)
+                    if size > 204800:
+                        continue
                     elif filename.endswith('.xlsm'):
-                        link = os.path.join(dirpath, filename)
                         list_of_files.append(link)
                     elif filename.endswith('.xlsx'):
-                        link = os.path.join(dirpath, filename)
                         list_of_files.append(link)
                     elif filename.endswith('.XLSX'):
-                        link = os.path.join(dirpath, filename)
                         list_of_files.append(link)
         except Exception as exc:
-            log = open('log.txt', 'a', encoding='UTF-8')
+            log = open((self.file_to_create['Name'][:-4]+'_log.txt'), 'a', encoding='UTF-8')
             error_str = f'Error get file {dirpath} --> {type(exc)} {exc} \n'
             log.write(error_str)
             log.close()
@@ -273,14 +282,13 @@ class ParserKTO(Thread):
 def main():
     tasks = []
     try:
-        first_line = True
+        # first_line = True
         with open('task.txt', 'r', encoding='UTF8') as file:
             for line in file:
-                if first_line:
-                    first_line = False
-                    continue
                 tuple_task = line.split(sep=',')
-                tuple_task[0] = f'./{tuple_task[0]}'
+                if tuple_task[0] == '#':
+                    continue
+                tuple_task[0] = f'./Отчеты/{tuple_task[0]}'
                 if tuple_task[1].endswith('\n'):
                     tuple_task[1] = tuple_task[1][:-1]
                 tasks.append(tuple_task)
@@ -299,28 +307,22 @@ def main():
     #     parser = ParserKTO(task=task)
     parsers = [ParserKTO(task=task) for task in tasks]
     print('Ищем файлы в указанных директориях. "Это может занять несколько минут.')
+    count_thread = len(parsers)
+
 
     for parser in parsers:
         parser.start()
 
-    count_thread = len(parsers)
-    process_flag = True
-    while process_flag:
-        time.sleep(10)
-        sum_proc = 0
-        for parser in parsers:
-            print(f"{parser.file_to_create['Name'][2:]:<40} --> {parser.percentage_of_completion:>4} %")
-            sum_proc += parser.percentage_of_completion
-            if parser.percentage_of_completion == 100:
-                process_flag = False
-            else:
-                process_flag = True
-        print('====================================================')
-        print(f'Парсинг выпонен на {round(sum_proc/count_thread, 1)} %')
-        print('====================================================')
-
     for parser in parsers:
         parser.join()
+        sum_proc = 0
+        for parser_check in parsers:
+            print(f"{parser_check.file_to_create['Name'][2:]:<40} --> {parser_check.percentage_of_completion:>4} %")
+            sum_proc += parser_check.percentage_of_completion
+        print('====================================================')
+        print(f'Парсинг выполен на {round(sum_proc/count_thread, 1)} %')
+        print('====================================================')
+        time.sleep(1)
 
 
 if __name__ == '__main__':
