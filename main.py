@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import os
+import time
+import warnings
 from threading import Thread
+
 import openpyxl
 from openpyxl import load_workbook
+
 from utils import time_track
-import time
 
 
 class ParserKTO(Thread):
@@ -85,25 +88,22 @@ class ParserKTO(Thread):
         self.read_file = None
         self.my_wb = None
         self.my_sheet = None
-
         self.percentage_of_completion = 0
         self.count_process = 0
         self.total_files = None
+        self.start_parsing = False
 
     def run(self):
         self.list_files = self._get_list_of_file(self.directory)
+        self.start_parsing = True
         if not self.list_files:
             print(f'В директории "{self.directory}" отчетов КТО в формате exel не найдено.')
             self.percentage_of_completion = float(100)
             return
         self.total_files = len(self.list_files)
         self._create_file()
+
         for self.read_file in self.list_files:
-            # TODO временная вставка
-            # check_links = open((self.file_to_create['Name'][:-5] + '_Links.txt'), 'a', encoding='UTF-8')
-            # write_str = self.read_file + '\n'
-            # check_links.write(write_str)
-            # check_links.close()
             try:
                 wb = load_workbook(self.read_file, data_only=True)
                 if self.read_file.endswith('.xlsm'):
@@ -240,6 +240,7 @@ class ParserKTO(Thread):
     def _get_list_of_file(self, dirpath):
         list_of_files = []
         normal_dir = os.path.normpath(dirpath)
+        print('Ищем файлы в указанных директориях. Это может занять несколько минут.')
         try:
             for dirpath, _, filenames in os.walk(normal_dir):
                 for filename in filenames:
@@ -264,11 +265,15 @@ class ParserKTO(Thread):
             error_str = f'Ошибка поиска файлов в: {dirpath} --> {type(exc)} {exc} \n'
             log.write(error_str)
             log.close()
+
         return list_of_files
 
 
 @time_track
 def main():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    # warnings.filterwarnings("ignore", module=openpyxl)
+
     tasks = []
     try:
         # читаем файл с заданиями формата: имя_нового_файла.xlsx,адрес файла
@@ -287,15 +292,22 @@ def main():
         quit()
 
     parsers = [ParserKTO(task=task) for task in tasks]
-    print('Ищем файлы в указанных директориях. Это может занять несколько минут.')
+
     count_thread = len(parsers)
 
     for parser in parsers:
         parser.start()
 
-    process_flag = True
+    # ждем окончания поиска файлов для парсинга, чтобы начать выводить прогресс парсинга.
+    process_flag = False
+    while not process_flag:
+        time.sleep(1)
+        for parser in parsers:
+            if parser.start_parsing:
+                process_flag = True
+
+    print('Начинаем парсинг найденных файлов.')
     while process_flag:
-        time.sleep(15)
         sum_proc = 0
         for parser in parsers:
             print(f"{parser.file_to_create['Name'][2:]:<40} --> {parser.percentage_of_completion:>5} %")
@@ -307,6 +319,7 @@ def main():
         print('====================================================')
         print(f'Парсинг выпонен на {round(sum_proc / count_thread, 1)} %')
         print('====================================================')
+        time.sleep(15)
 
     for parser in parsers:
         parser.join()
